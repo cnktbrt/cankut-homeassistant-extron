@@ -1,0 +1,21 @@
+{
+  "title": "Cankut Extron",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Extron cihazına bağlan",
+        "description": "Extron IPL PRO S3 TCP bağlantı bilgilerini girin.",
+        "data": {
+          "host": "IP adresi",
+          "port": "TCP portu"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Extron cihazına bağlanılamadı. IP adresini, portu ve Extron main.py dosyasını kontrol edin."
+    },
+    "abort": {
+      "already_configured": "Bu Extron cihazı zaten eklenmiş."
+    }
+  }
+}
