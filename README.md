@@ -1,15 +1,6 @@
-# Cankut Extron
+# Cankut Extron v1.1.0
+Epson TW6100 ve Kramer VS-88H2A entegrasyonu.
 
-Home Assistant için Extron IPL PRO S3 entegrasyonu.
-
-## Kurulum
-
-HACS → Custom repositories
-
-Repository:
-
-https://github.com/cnktbrt/cankut-homeassistant-extron
-
-Category:
-
-Integration
+Matrix entity'leri:
+- `select.matrix_selected_output`
+- `select.matrix_active_input`
