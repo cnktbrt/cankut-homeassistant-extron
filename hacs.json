@@ -1,1 +1,9 @@
-{"name":"Cankut Extron","content_in_root":false,"render_readme":true,"homeassistant":"2025.1.0"}
+{
+  "name": "Extron Virtual Devices",
+  "country": "TR",
+  "domains": [
+    "extron_virtual_devices"
+  ],
+  "homeassistant": "2025.1.0",
+  "render_readme": true
+}
