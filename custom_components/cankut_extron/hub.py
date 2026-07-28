@@ -1,177 +1,89 @@
-"""TCP communication hub for the Cankut Extron integration."""
-
 from __future__ import annotations
+import asyncio, contextlib
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, OptionsFlowWithReload
+from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.core import callback
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode, TextSelector, TextSelectorConfig
+from .const import *
 
-import asyncio
-import logging
-from collections.abc import Callable
+class CannotConnect(Exception):
+    pass
 
-from homeassistant.core import HomeAssistant
+async def _validate(host, port):
+    writer = None
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 5)
+        writer.write(b"PING\r\n")
+        await writer.drain()
+        response = await asyncio.wait_for(reader.readline(), 5)
+        if response.decode(errors="ignore").strip() != "PONG":
+            raise CannotConnect
+    except (ConnectionError, OSError, asyncio.TimeoutError) as err:
+        raise CannotConnect from err
+    finally:
+        if writer:
+            writer.close()
+            with contextlib.suppress(ConnectionError, OSError):
+                await writer.wait_closed()
 
-from .const import (
-    PROJECTOR_STATE_OFF,
-    PROJECTOR_STATE_ON,
-    PROJECTOR_STATUS_COMMAND,
-    RECONNECT_DELAY,
-)
+class CankutExtronConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    VERSION = 1
 
-_LOGGER = logging.getLogger(__name__)
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry):
+        return CankutExtronOptionsFlow()
 
-
-class ExtronHub:
-    """Maintain the TCP connection between Home Assistant and Extron."""
-
-    def __init__(self, hass: HomeAssistant, host: str, port: int) -> None:
-        self.hass = hass
-        self.host = host
-        self.port = port
-
-        self.connected = False
-        self.projector_is_on: bool | None = None
-
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
-        self._connection_task: asyncio.Task | None = None
-        self._write_lock = asyncio.Lock()
-        self._listeners: list[Callable[[], None]] = []
-        self._stopping = False
-
-    async def async_start(self) -> None:
-        """Start the persistent TCP connection task."""
-        if self._connection_task is not None:
-            return
-
-        self._stopping = False
-        self._connection_task = self.hass.async_create_task(
-            self._connection_loop()
-        )
-
-    async def async_stop(self) -> None:
-        """Stop the TCP connection task."""
-        self._stopping = True
-
-        if self._writer is not None:
-            self._writer.close()
+    async def async_step_user(self, user_input=None):
+        errors = {}
+        if user_input:
+            host, port = user_input[CONF_HOST].strip(), user_input[CONF_PORT]
+            await self.async_set_unique_id(f"{host}:{port}")
+            self._abort_if_unique_id_configured()
             try:
-                await self._writer.wait_closed()
-            except (ConnectionError, OSError):
-                pass
+                await _validate(host, port)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_create_entry(title=f"Extron IPL PRO S3 ({host})", data={CONF_HOST: host, CONF_PORT: port})
+        return self.async_show_form(step_id="user", data_schema=vol.Schema({
+            vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
+            vol.Required(CONF_PORT, default=DEFAULT_PORT): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+        }), errors=errors)
 
-        if self._connection_task is not None:
-            self._connection_task.cancel()
-            try:
-                await self._connection_task
-            except asyncio.CancelledError:
-                pass
-            self._connection_task = None
+class CankutExtronOptionsFlow(OptionsFlowWithReload):
+    def __init__(self):
+        self._used_inputs = []
+        self._used_outputs = []
 
-        self._reader = None
-        self._writer = None
-        self.connected = False
-        self._notify_listeners()
+    async def async_step_init(self, user_input=None):
+        if user_input:
+            self._used_inputs = sorted([str(x) for x in user_input[CONF_USED_INPUTS]], key=int)
+            self._used_outputs = sorted([str(x) for x in user_input[CONF_USED_OUTPUTS]], key=int)
+            return await self.async_step_names()
+        opts = self.config_entry.options
+        choices = [{"value": str(i), "label": str(i)} for i in range(1, 9)]
+        return self.async_show_form(step_id="init", data_schema=vol.Schema({
+            vol.Required(CONF_USED_INPUTS, default=list(opts.get(CONF_USED_INPUTS, DEFAULT_USED_INPUTS))): SelectSelector(SelectSelectorConfig(options=choices, multiple=True, mode=SelectSelectorMode.DROPDOWN)),
+            vol.Required(CONF_USED_OUTPUTS, default=list(opts.get(CONF_USED_OUTPUTS, DEFAULT_USED_OUTPUTS))): SelectSelector(SelectSelectorConfig(options=choices, multiple=True, mode=SelectSelectorMode.DROPDOWN)),
+        }))
 
-    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
-        """Register an entity update listener."""
-        self._listeners.append(listener)
-
-        def remove_listener() -> None:
-            if listener in self._listeners:
-                self._listeners.remove(listener)
-
-        return remove_listener
-
-    async def async_send(self, command: str) -> bool:
-        """Send one line to Extron."""
-        writer = self._writer
-
-        if not self.connected or writer is None or writer.is_closing():
-            _LOGGER.warning("Extron bağlantısı yok; komut gönderilemedi: %s", command)
-            return False
-
-        try:
-            async with self._write_lock:
-                writer.write((command.strip() + "\r\n").encode("utf-8"))
-                await writer.drain()
-            return True
-        except (ConnectionError, OSError) as err:
-            _LOGGER.warning("Extron komutu gönderilemedi: %s", err)
-            return False
-
-    async def async_request_projector_status(self) -> bool:
-        """Ask Extron for the current projector power state."""
-        return await self.async_send(PROJECTOR_STATUS_COMMAND)
-
-    async def _connection_loop(self) -> None:
-        """Reconnect automatically and process incoming status messages."""
-        while not self._stopping:
-            try:
-                _LOGGER.info(
-                    "Extron cihazına bağlanılıyor: %s:%s", self.host, self.port
-                )
-
-                self._reader, self._writer = await asyncio.open_connection(
-                    self.host,
-                    self.port,
-                )
-
-                self.connected = True
-                self._notify_listeners()
-                _LOGGER.info("Extron bağlantısı kuruldu")
-
-                await self.async_request_projector_status()
-
-                while not self._stopping:
-                    line_bytes = await self._reader.readline()
-
-                    if not line_bytes:
-                        raise ConnectionError("Extron TCP bağlantıyı kapattı")
-
-                    message = line_bytes.decode(
-                        "utf-8", errors="ignore"
-                    ).strip()
-
-                    if message:
-                        self._handle_message(message)
-
-            except asyncio.CancelledError:
-                raise
-            except (ConnectionError, OSError, asyncio.TimeoutError) as err:
-                if not self._stopping:
-                    _LOGGER.warning("Extron bağlantı hatası: %s", err)
-            finally:
-                self.connected = False
-
-                if self._writer is not None:
-                    self._writer.close()
-                    try:
-                        await self._writer.wait_closed()
-                    except (ConnectionError, OSError):
-                        pass
-
-                self._reader = None
-                self._writer = None
-                self._notify_listeners()
-
-            if not self._stopping:
-                await asyncio.sleep(RECONNECT_DELAY)
-
-    def _handle_message(self, message: str) -> None:
-        """Interpret messages sent by Extron."""
-        if message == PROJECTOR_STATE_ON:
-            if self.projector_is_on is not True:
-                self.projector_is_on = True
-                self._notify_listeners()
-            return
-
-        if message == PROJECTOR_STATE_OFF:
-            if self.projector_is_on is not False:
-                self.projector_is_on = False
-                self._notify_listeners()
-            return
-
-        _LOGGER.debug("Extron mesajı: %s", message)
-
-    def _notify_listeners(self) -> None:
-        """Notify all Home Assistant entities."""
-        for listener in list(self._listeners):
-            listener()
+    async def async_step_names(self, user_input=None):
+        opts = self.config_entry.options
+        old_in = dict(opts.get(CONF_INPUT_NAMES, DEFAULT_INPUT_NAMES))
+        old_out = dict(opts.get(CONF_OUTPUT_NAMES, DEFAULT_OUTPUT_NAMES))
+        if user_input:
+            return self.async_create_entry(data={
+                CONF_USED_INPUTS: self._used_inputs,
+                CONF_USED_OUTPUTS: self._used_outputs,
+                CONF_INPUT_NAMES: {n: user_input[f"input_{n}_name"].strip() or f"Input {n}" for n in self._used_inputs},
+                CONF_OUTPUT_NAMES: {n: user_input[f"output_{n}_name"].strip() or f"Output {n}" for n in self._used_outputs},
+            })
+        fields = {}
+        for n in self._used_inputs:
+            fields[vol.Required(f"input_{n}_name", default=old_in.get(n, f"Input {n}"))] = TextSelector(TextSelectorConfig())
+        for n in self._used_outputs:
+            fields[vol.Required(f"output_{n}_name", default=old_out.get(n, f"Output {n}"))] = TextSelector(TextSelectorConfig())
+        return self.async_show_form(step_id="names", data_schema=vol.Schema(fields))
