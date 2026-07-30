@@ -25,7 +25,7 @@ class MatrixCodeSendText(CoordinatorEntity[ExtronCoordinator], TextEntity):
     _attr_name = "Code Send"
     _attr_icon = "mdi:console"
     _attr_mode = TextMode.TEXT
-    _attr_native_min = 1
+    _attr_native_min = 0
     _attr_native_max = 255
     _attr_pattern = r"^#.*"
 
@@ -50,7 +50,7 @@ class MatrixCodeSendText(CoordinatorEntity[ExtronCoordinator], TextEntity):
 
     @property
     def native_value(self) -> str:
-        return self.coordinator.data[DATA_CODE_SEND]
+        return self.coordinator.data.get(DATA_CODE_SEND, "")
 
     async def async_set_value(self, value: str) -> None:
         await self.coordinator.async_send_raw_matrix_code(value)
