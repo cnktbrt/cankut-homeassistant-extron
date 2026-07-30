@@ -50,3 +50,9 @@ Mevcut projeksiyon ve matrix entity'leri değiştirilmeden aşağıdaki yeni ent
 
 Code Send kutusuna Kramer Protocol 3000 komutu `#` ile başlayacak şekilde yazılır.
 Örnek: `#VOLUME? 1`
+
+## Apple TV HDCP
+
+Kramer HDMI Input 4 için Apple TV HDCP aç/kapat switch’i eklendi.
+Komutlar: `#HDCP-MOD 4,1` ve `#HDCP-MOD 4,0`.
+Durum sorgusu: `#HDCP-MOD? 4`.

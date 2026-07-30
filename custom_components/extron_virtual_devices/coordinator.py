@@ -14,6 +14,7 @@ from .const import (
     DATA_ACTIVE_INPUT,
     DATA_AVAILABLE,
     DATA_CODE_SEND,
+    DATA_HDCP_MODE,
     DATA_MUTE_STATE,
     DATA_PROJECTOR_POWER,
     DATA_SELECTED_OUTPUT,
@@ -43,6 +44,7 @@ class ExtronCoordinator(DataUpdateCoordinator[dict]):
             DATA_VOLUME_LEVEL: None,
             DATA_MUTE_STATE: None,
             DATA_CODE_SEND: "",
+            DATA_HDCP_MODE: None,
         }
 
         self._reader: asyncio.StreamReader | None = None
@@ -89,6 +91,7 @@ class ExtronCoordinator(DataUpdateCoordinator[dict]):
                 await self.async_send("MATRIX_QUERY:1")
                 await self.async_send("MATRIX_AUDIO_QUERY")
                 await self.async_send("MATRIX_VOLUME_QUERY")
+                await self.async_send("MATRIX_HDCP_QUERY")
 
                 while not self._stopping:
                     raw_line = await self._reader.readline()
@@ -162,6 +165,12 @@ class ExtronCoordinator(DataUpdateCoordinator[dict]):
     async def async_mute_off(self) -> None:
         await self.async_send("MATRIX_MUTE_OFF")
 
+    async def async_hdcp_on(self) -> None:
+        await self.async_send("MATRIX_HDCP_ON")
+
+    async def async_hdcp_off(self) -> None:
+        await self.async_send("MATRIX_HDCP_OFF")
+
     async def async_send_raw_matrix_code(self, command: str) -> None:
         clean_command = command.strip().replace("\r", "").replace("\n", "")
 
@@ -233,6 +242,14 @@ class ExtronCoordinator(DataUpdateCoordinator[dict]):
 
         if normalized == "MATRIX_MUTE_STATE:OFF":
             self._set_value(DATA_MUTE_STATE, False)
+            return
+
+        if normalized == "MATRIX_HDCP_STATE:ON":
+            self._set_value(DATA_HDCP_MODE, True)
+            return
+
+        if normalized == "MATRIX_HDCP_STATE:OFF":
+            self._set_value(DATA_HDCP_MODE, False)
             return
 
     def _set_value(self, key: str, value) -> None:

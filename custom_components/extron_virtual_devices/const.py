@@ -14,6 +14,7 @@ DATA_ACTIVE_AUDIO = "active_audio"
 DATA_VOLUME_LEVEL = "volume_level"
 DATA_MUTE_STATE = "mute_state"
 DATA_CODE_SEND = "code_send"
+DATA_HDCP_MODE = "hdcp_mode"
 DATA_AVAILABLE = "available"
 
 OUTPUT_OPTIONS = [f"Output {number}" for number in range(1, 9)]

@@ -10,6 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     DATA_AVAILABLE,
     DATA_MUTE_STATE,
+    DATA_HDCP_MODE,
     DATA_PROJECTOR_POWER,
     DOMAIN,
 )
@@ -26,6 +27,7 @@ async def async_setup_entry(
         [
             ProjectorPowerSwitch(coordinator, entry),
             MatrixMuteSwitch(coordinator, entry),
+            AppleTvHdcpSwitch(coordinator, entry),
         ]
     )
 
@@ -98,3 +100,38 @@ class MatrixMuteSwitch(CoordinatorEntity[ExtronCoordinator], SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_mute_off()
+
+
+class AppleTvHdcpSwitch(CoordinatorEntity[ExtronCoordinator], SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Apple TV HDCP"
+    _attr_icon = "mdi:shield-lock"
+
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_apple_tv_hdcp"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_matrix")},
+            name="Kramer VS-88H2A",
+            manufacturer="Kramer",
+            model="VS-88H2A",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data[DATA_AVAILABLE])
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.data[DATA_HDCP_MODE]
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_hdcp_on()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_hdcp_off()

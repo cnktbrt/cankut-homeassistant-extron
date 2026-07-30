@@ -7,7 +7,7 @@ from extronlib.device import ProcessorDevice
 # DONANIM
 # ============================================================
 
-processor = ProcessorDevice("ProcessorAlias")
+processor = ProcessorDevice("MainProcessor")
 
 projector = SerialInterface(
     processor,
@@ -39,6 +39,15 @@ matrix_buffer = ""
 last_projector_state = None
 last_matrix_routes = {}
 last_audio_input = None
+
+# Analog OUT 1 ses seviyesi
+last_volume_level = None
+
+# Bu projede ses mute işlemi, volume seviyesini 0 yaparak uygulanıyor.
+# Unmute sırasında son sıfırdan büyük seviye geri yükleniyor.
+last_volume_before_mute = 50
+last_mute_state = False
+last_hdcp_mode = None
 
 
 # ============================================================
@@ -114,7 +123,7 @@ def publish_matrix_route(output_number, input_number):
 
 
 # ============================================================
-# KRAMER HARICI SES
+# KRAMER HARICI SES GIRIS SECIMI
 # ============================================================
 
 def matrix_audio_set(input_number):
@@ -124,8 +133,6 @@ def matrix_audio_set(input_number):
 
 
 def matrix_audio_query():
-    # Kramer cihazında sorgu sözdizimi firmware'e göre farklılık gösterebilir.
-    # Önce mevcut EXT-AUD durumunu istemek için bu biçim denenir.
     command = "#EXT-AUD?\r"
     print("KRAMER SES STATUS SORGUSU: {}".format(command.strip()))
     matrix.Send(command)
@@ -136,6 +143,125 @@ def publish_audio_state(input_number):
 
     last_audio_input = input_number
     broadcast("MATRIX_AUDIO_STATE:{}".format(input_number))
+
+
+# ============================================================
+# KRAMER ANALOG OUT 1 SES SEVIYESI
+# ============================================================
+
+def matrix_volume_up():
+    command = "#VOLUME 1,++\r"
+    print("KRAMER SES AC KOMUTU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def matrix_volume_down():
+    command = "#VOLUME 1,--\r"
+    print("KRAMER SES KIS KOMUTU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def matrix_volume_set(volume_level):
+    command = "#VOLUME 1,{}\r".format(volume_level)
+    print("KRAMER SES SEVIYESI KOMUTU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def matrix_volume_query():
+    command = "#VOLUME? 1\r"
+    print("KRAMER SES SEVIYESI SORGUSU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def publish_mute_state(is_muted):
+    global last_mute_state
+
+    last_mute_state = bool(is_muted)
+    broadcast(
+        "MATRIX_MUTE_STATE:{}".format(
+            "ON" if last_mute_state else "OFF"
+        )
+    )
+
+
+def publish_volume_state(volume_level):
+    global last_volume_level
+    global last_volume_before_mute
+
+    if volume_level < 0 or volume_level > 100:
+        return
+
+    last_volume_level = volume_level
+    broadcast("MATRIX_VOLUME_STATE:{}".format(volume_level))
+
+    if volume_level == 0:
+        publish_mute_state(True)
+    else:
+        last_volume_before_mute = volume_level
+        publish_mute_state(False)
+
+
+def matrix_mute_on():
+    global last_volume_before_mute
+
+    if last_volume_level is not None and last_volume_level > 0:
+        last_volume_before_mute = last_volume_level
+
+    print(
+        "KRAMER MUTE ON: SES 0 YAPILIYOR, GERI DONUS SEVIYESI {}".format(
+            last_volume_before_mute
+        )
+    )
+    matrix_volume_set(0)
+
+
+def matrix_mute_off():
+    restore_level = last_volume_before_mute
+
+    if restore_level < 1 or restore_level > 100:
+        restore_level = 50
+
+    print(
+        "KRAMER MUTE OFF: SES {} SEVIYESINE DONUYOR".format(
+            restore_level
+        )
+    )
+    matrix_volume_set(restore_level)
+
+
+def matrix_mute_toggle():
+    if last_volume_level == 0 or last_mute_state:
+        matrix_mute_off()
+    else:
+        matrix_mute_on()
+
+
+# ============================================================
+# KRAMER APPLE TV HDCP - HDMI INPUT 4
+# ============================================================
+
+def matrix_hdcp_set(enabled):
+    mode = 1 if enabled else 0
+    command = "#HDCP-MOD 4,{}\r".format(mode)
+    print("KRAMER APPLE TV HDCP KOMUTU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def matrix_hdcp_query():
+    command = "#HDCP-MOD? 4\r"
+    print("KRAMER APPLE TV HDCP SORGUSU: {}".format(command.strip()))
+    matrix.Send(command)
+
+
+def publish_hdcp_state(enabled):
+    global last_hdcp_mode
+
+    last_hdcp_mode = bool(enabled)
+    broadcast(
+        "MATRIX_HDCP_STATE:{}".format(
+            "ON" if last_hdcp_mode else "OFF"
+        )
+    )
 
 
 # ============================================================
@@ -257,6 +383,120 @@ def handle_ha_command(client, raw_command):
             )
         return
 
+    if upper_command == "MATRIX_VOLUME_UP":
+        matrix_volume_up()
+        send_to_client(client, "OK:MATRIX_VOLUME_UP")
+        return
+
+    if upper_command == "MATRIX_VOLUME_DOWN":
+        matrix_volume_down()
+        send_to_client(client, "OK:MATRIX_VOLUME_DOWN")
+        return
+
+    if upper_command.startswith("MATRIX_VOLUME_SET:"):
+        parts = upper_command.split(":")
+
+        if len(parts) != 2 or not parts[1].isdigit():
+            send_to_client(client, "ERROR:MATRIX_VOLUME_FORMAT")
+            return
+
+        volume_level = int(parts[1])
+
+        if volume_level < 0 or volume_level > 100:
+            send_to_client(client, "ERROR:MATRIX_VOLUME_RANGE")
+            return
+
+        matrix_volume_set(volume_level)
+        send_to_client(
+            client,
+            "OK:MATRIX_VOLUME_SET:{}".format(volume_level),
+        )
+        return
+
+    if upper_command == "MATRIX_VOLUME_QUERY":
+        matrix_volume_query()
+
+        if last_volume_level is not None:
+            send_to_client(
+                client,
+                "MATRIX_VOLUME_STATE:{}".format(last_volume_level),
+            )
+        return
+
+    if upper_command == "MATRIX_MUTE_ON":
+        matrix_mute_on()
+        send_to_client(client, "OK:MATRIX_MUTE_ON")
+        return
+
+    if upper_command == "MATRIX_MUTE_OFF":
+        matrix_mute_off()
+        send_to_client(client, "OK:MATRIX_MUTE_OFF")
+        return
+
+    if upper_command == "MATRIX_MUTE_TOGGLE":
+        matrix_mute_toggle()
+        send_to_client(client, "OK:MATRIX_MUTE_TOGGLE")
+        return
+
+    if upper_command == "MATRIX_MUTE_QUERY":
+        if last_volume_level is None:
+            matrix_volume_query()
+        else:
+            send_to_client(
+                client,
+                "MATRIX_MUTE_STATE:{}".format(
+                    "ON" if last_mute_state else "OFF"
+                ),
+            )
+        return
+
+    # Home Assistant Code Send kutusundan gelen ham Kramer komutu.
+    if upper_command == "MATRIX_HDCP_ON":
+        matrix_hdcp_set(True)
+        send_to_client(client, "OK:MATRIX_HDCP_ON")
+        return
+
+    if upper_command == "MATRIX_HDCP_OFF":
+        matrix_hdcp_set(False)
+        send_to_client(client, "OK:MATRIX_HDCP_OFF")
+        return
+
+    if upper_command == "MATRIX_HDCP_QUERY":
+        matrix_hdcp_query()
+
+        if last_hdcp_mode is not None:
+            send_to_client(
+                client,
+                "MATRIX_HDCP_STATE:{}".format(
+                    "ON" if last_hdcp_mode else "OFF"
+                ),
+            )
+        return
+
+    # Örnek: MATRIX_RAW:#VOLUME? 1
+    if upper_command.startswith("MATRIX_RAW:"):
+        raw_matrix_command = command.split(":", 1)[1].strip()
+
+        if not raw_matrix_command:
+            send_to_client(client, "ERROR:MATRIX_RAW_EMPTY")
+            return
+
+        # Tek komut dışında satır sonu gönderilmesini engelle.
+        raw_matrix_command = raw_matrix_command.replace("\r", "")
+        raw_matrix_command = raw_matrix_command.replace("\n", "")
+
+        if not raw_matrix_command.startswith("#"):
+            send_to_client(client, "ERROR:MATRIX_RAW_PREFIX")
+            return
+
+        print("KRAMER RAW KOMUTU: {}".format(raw_matrix_command))
+        matrix.Send("{}\r".format(raw_matrix_command))
+        send_to_client(
+            client,
+            "OK:MATRIX_RAW:{}".format(raw_matrix_command),
+        )
+        return
+
     send_to_client(client, "ERROR:UNKNOWN_COMMAND")
 
 
@@ -283,6 +523,26 @@ def client_connected(client, state):
         send_to_client(
             client,
             "MATRIX_AUDIO_STATE:{}".format(last_audio_input),
+        )
+
+    if last_volume_level is not None:
+        send_to_client(
+            client,
+            "MATRIX_VOLUME_STATE:{}".format(last_volume_level),
+        )
+        send_to_client(
+            client,
+            "MATRIX_MUTE_STATE:{}".format(
+                "ON" if last_mute_state else "OFF"
+            ),
+        )
+
+    if last_hdcp_mode is not None:
+        send_to_client(
+            client,
+            "MATRIX_HDCP_STATE:{}".format(
+                "ON" if last_hdcp_mode else "OFF"
+            ),
         )
 
 
@@ -377,23 +637,83 @@ def parse_kramer_line(response):
         return
 
     # Örnek:
+    # ~01@HDCP-MOD 4,1
+    # ~01@HDCP-MOD 4,0
+    if "@HDCP-MOD " in upper_response:
+        values_text = upper_response.split("@HDCP-MOD ", 1)[1]
+        values = [value.strip() for value in values_text.split(",")]
+
+        if len(values) >= 2:
+            input_text = "".join(
+                character
+                for character in values[0]
+                if character.isdigit()
+            )
+            mode_text = "".join(
+                character
+                for character in values[1]
+                if character.isdigit()
+            )
+
+            if input_text and mode_text:
+                input_number = int(input_text)
+                mode = int(mode_text)
+
+                if input_number == 4 and mode in (0, 1):
+                    publish_hdcp_state(mode == 1)
+        return
+
+    # Örnek:
+    # ~01@VOLUME 1,50
+    if "@VOLUME " in upper_response:
+        values_text = upper_response.split("@VOLUME ", 1)[1]
+        values = [value.strip() for value in values_text.split(",")]
+
+        if len(values) >= 2:
+            output_text = "".join(
+                character
+                for character in values[0]
+                if character.isdigit()
+            )
+            volume_text = "".join(
+                character
+                for character in values[1]
+                if character.isdigit()
+            )
+
+            if output_text and volume_text:
+                output_number = int(output_text)
+                volume_level = int(volume_text)
+
+                if output_number == 1 and 0 <= volume_level <= 100:
+                    publish_volume_state(volume_level)
+        return
+
+    # Kısa komut cevabı:
     # ~01@EXT-AUD 0,1,1,4
+    #
+    # Tam durum sorgusu cevabı:
+    # ~01@EXT-AUD 4,1,4,1,3,4,3,3,4,4,...
     if "@EXT-AUD " in upper_response:
         values_text = upper_response.split("@EXT-AUD ", 1)[1]
         values = [value.strip() for value in values_text.split(",")]
 
-        if len(values) >= 4:
-            input_text = "".join(
-                character
-                for character in values[3]
-                if character.isdigit()
-            )
+        if len(values) == 4:
+            input_text = values[3]
+        elif len(values) >= 9:
+            input_text = values[8]
+        else:
+            return
 
-            if input_text:
-                input_number = int(input_text)
+        input_text = "".join(
+            character for character in input_text if character.isdigit()
+        )
 
-                if 1 <= input_number <= 8:
-                    publish_audio_state(input_number)
+        if input_text:
+            input_number = int(input_text)
+
+            if 1 <= input_number <= 8:
+                publish_audio_state(input_number)
         return
 
 
@@ -419,12 +739,13 @@ def matrix_receive(interface, data):
 def poll_devices(timer, count):
     projector_status()
 
-    # Seçili output HA tarafından ayrıca sorgulanır.
     # Burada 1-8 bütün video rotalarını senkron tutuyoruz.
     for output_number in range(1, 9):
         matrix_query(output_number)
 
     matrix_audio_query()
+    matrix_volume_query()
+    matrix_hdcp_query()
 
 
 poll_timer = Timer(10, poll_devices)
@@ -434,3 +755,5 @@ server.StartListen()
 print("TCP SERVER DINLEMEDE: PORT 5000")
 print("EPSON COM1: 9600 8N1")
 print("KRAMER COM2: 115200 8N1")
+print("KRAMER ANALOG OUT 1 VOLUME: 0-100")
+print("KRAMER MUTE: VOLUME 0 / ONCEKI SEVIYEYE DONUS")
