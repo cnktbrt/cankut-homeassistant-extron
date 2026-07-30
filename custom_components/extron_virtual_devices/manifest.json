@@ -2,10 +2,10 @@
   "domain": "extron_virtual_devices",
   "name": "Extron Virtual Devices",
   "version": "1.3.0",
+  "documentation": "https://github.com/cnktbrt/cankut-homeassistant-extron",
+  "issue_tracker": "https://github.com/cnktbrt/cankut-homeassistant-extron/issues",
   "config_flow": true,
-  "documentation": "https://github.com/",
-  "requirements": [],
-  "codeowners": [],
+  "integration_type": "hub",
   "iot_class": "local_push",
-  "integration_type": "hub"
+  "requirements": []
 }

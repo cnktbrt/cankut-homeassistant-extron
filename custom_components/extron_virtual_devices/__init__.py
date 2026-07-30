@@ -8,12 +8,7 @@ from .coordinator import ExtronCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    coordinator = ExtronCoordinator(
-        hass,
-        host=entry.data["host"],
-        port=entry.data["port"],
-    )
-
+    coordinator = ExtronCoordinator(hass, entry)
     await coordinator.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -22,10 +17,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
-    if unloaded:
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
+    if unload_ok:
+        coordinator: ExtronCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_stop()
 
-    return unloaded
+    return unload_ok

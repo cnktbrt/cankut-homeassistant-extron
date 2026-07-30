@@ -3,10 +3,17 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .entity import ExtronEntity
+from .const import (
+    DATA_AVAILABLE,
+    DATA_MUTE_STATE,
+    DATA_PROJECTOR_POWER,
+    DOMAIN,
+)
+from .coordinator import ExtronCoordinator
 
 
 async def async_setup_entry(
@@ -14,24 +21,42 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-
+    coordinator: ExtronCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            EpsonProjectorSwitch(coordinator, entry.entry_id),
-            KramerMuteSwitch(coordinator, entry.entry_id),
+            ProjectorPowerSwitch(coordinator, entry),
+            MatrixMuteSwitch(coordinator, entry),
         ]
     )
 
 
-class EpsonProjectorSwitch(ExtronEntity, SwitchEntity):
-    _attr_name = "Epson TW6100 Güç"
-    _attr_unique_id = "epson_tw6100_power"
+class ProjectorPowerSwitch(CoordinatorEntity[ExtronCoordinator], SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Güç"
     _attr_icon = "mdi:projector"
+
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_projector_power"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_projector")},
+            name="Epson TW6100",
+            manufacturer="Epson",
+            model="TW6100",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data[DATA_AVAILABLE])
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator.data.get("projector_power")
+        return self.coordinator.data[DATA_PROJECTOR_POWER]
 
     async def async_turn_on(self, **kwargs) -> None:
         await self.coordinator.async_send("PROJECTOR_ON")
@@ -40,17 +65,36 @@ class EpsonProjectorSwitch(ExtronEntity, SwitchEntity):
         await self.coordinator.async_send("PROJECTOR_OFF")
 
 
-class KramerMuteSwitch(ExtronEntity, SwitchEntity):
-    _attr_name = "Kramer VS-88H2A Ses Mute"
-    _attr_unique_id = "kramer_vs_88h2a_audio_mute"
+class MatrixMuteSwitch(CoordinatorEntity[ExtronCoordinator], SwitchEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Ses Mute"
     _attr_icon = "mdi:volume-mute"
+
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_matrix_mute"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_matrix")},
+            name="Kramer VS-88H2A",
+            manufacturer="Kramer",
+            model="VS-88H2A",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data[DATA_AVAILABLE])
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator.data.get("mute")
+        return self.coordinator.data[DATA_MUTE_STATE]
 
     async def async_turn_on(self, **kwargs) -> None:
-        await self.coordinator.async_send("MATRIX_MUTE_ON")
+        await self.coordinator.async_mute_on()
 
     async def async_turn_off(self, **kwargs) -> None:
-        await self.coordinator.async_send("MATRIX_MUTE_OFF")
+        await self.coordinator.async_mute_off()

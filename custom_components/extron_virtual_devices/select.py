@@ -3,15 +3,20 @@ from __future__ import annotations
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    AUDIO_OPTIONS,
+    DATA_ACTIVE_AUDIO,
+    DATA_ACTIVE_INPUT,
+    DATA_AVAILABLE,
+    DATA_SELECTED_OUTPUT,
     DOMAIN,
     INPUT_OPTIONS,
     OUTPUT_OPTIONS,
 )
-from .entity import ExtronEntity
+from .coordinator import ExtronCoordinator
 
 
 async def async_setup_entry(
@@ -19,93 +24,97 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ExtronCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     async_add_entities(
         [
-            KramerOutputSelect(coordinator, entry.entry_id),
-            KramerInputSelect(coordinator, entry.entry_id),
-            KramerAudioInputSelect(coordinator, entry.entry_id),
+            MatrixSelectedOutputSelect(coordinator, entry),
+            MatrixActiveInputSelect(coordinator, entry),
+            MatrixActiveAudioSelect(coordinator, entry),
         ]
     )
 
 
-def _name_from_number(options: dict[str, int], number: int | None):
-    if number is None:
-        return None
+class MatrixSelectBase(CoordinatorEntity[ExtronCoordinator], SelectEntity):
+    _attr_has_entity_name = True
 
-    for name, value in options.items():
-        if value == number:
-            return name
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+        suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_{suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_matrix")},
+            name="Kramer VS-88H2A",
+            manufacturer="Kramer",
+            model="VS-88H2A",
+            via_device=(DOMAIN, entry.entry_id),
+        )
 
-    return None
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data[DATA_AVAILABLE])
 
 
-class KramerOutputSelect(ExtronEntity, SelectEntity):
-    _attr_name = "Kramer VS-88H2A Seçili Çıkış"
-    _attr_unique_id = "kramer_vs_88h2a_selected_output"
+class MatrixSelectedOutputSelect(MatrixSelectBase):
+    _attr_name = "Seçili Çıkış"
     _attr_icon = "mdi:video-output"
+    _attr_options = OUTPUT_OPTIONS
 
-    def __init__(self, coordinator, entry_id):
-        super().__init__(coordinator, entry_id)
-        self._attr_options = list(OUTPUT_OPTIONS)
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry, "selected_output")
 
     @property
-    def current_option(self):
-        return _name_from_number(
-            OUTPUT_OPTIONS,
-            self.coordinator.data.get("selected_output"),
-        )
+    def current_option(self) -> str | None:
+        return self.coordinator.data[DATA_SELECTED_OUTPUT]
 
     async def async_select_option(self, option: str) -> None:
-        output_number = OUTPUT_OPTIONS[option]
-        self.coordinator.select_output(output_number)
-        await self.coordinator.async_send(
-            f"MATRIX_QUERY:{output_number}"
-        )
+        self.coordinator.select_output(option)
+        await self.coordinator.async_query_selected_output()
 
 
-class KramerInputSelect(ExtronEntity, SelectEntity):
-    _attr_name = "Kramer VS-88H2A Aktif Giriş"
-    _attr_unique_id = "kramer_vs_88h2a_active_input"
+class MatrixActiveInputSelect(MatrixSelectBase):
+    _attr_name = "Aktif Giriş"
     _attr_icon = "mdi:video-input-hdmi"
+    _attr_options = INPUT_OPTIONS
 
-    def __init__(self, coordinator, entry_id):
-        super().__init__(coordinator, entry_id)
-        self._attr_options = list(INPUT_OPTIONS)
-
-    @property
-    def current_option(self):
-        output_number = self.coordinator.data.get("selected_output")
-        input_number = self.coordinator.data["routes"].get(output_number)
-        return _name_from_number(INPUT_OPTIONS, input_number)
-
-    async def async_select_option(self, option: str) -> None:
-        output_number = self.coordinator.data.get("selected_output", 1)
-        input_number = INPUT_OPTIONS[option]
-
-        await self.coordinator.async_send(
-            f"MATRIX_SET:{output_number}:{input_number}"
-        )
-
-
-class KramerAudioInputSelect(ExtronEntity, SelectEntity):
-    _attr_name = "Kramer VS-88H2A Aktif Ses"
-    _attr_unique_id = "kramer_vs_88h2a_active_audio"
-    _attr_icon = "mdi:audio-input-rca"
-
-    def __init__(self, coordinator, entry_id):
-        super().__init__(coordinator, entry_id)
-        self._attr_options = list(AUDIO_OPTIONS)
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry, "active_input")
 
     @property
-    def current_option(self):
-        return _name_from_number(
-            AUDIO_OPTIONS,
-            self.coordinator.data.get("audio_input"),
-        )
+    def current_option(self) -> str | None:
+        return self.coordinator.data[DATA_ACTIVE_INPUT]
 
     async def async_select_option(self, option: str) -> None:
-        await self.coordinator.async_send(
-            f"MATRIX_AUDIO:{AUDIO_OPTIONS[option]}"
-        )
+        await self.coordinator.async_set_video_input(option)
+
+
+class MatrixActiveAudioSelect(MatrixSelectBase):
+    _attr_name = "Aktif Ses"
+    _attr_icon = "mdi:volume-high"
+    _attr_options = INPUT_OPTIONS
+
+    def __init__(
+        self,
+        coordinator: ExtronCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry, "active_audio")
+
+    @property
+    def current_option(self) -> str | None:
+        return self.coordinator.data[DATA_ACTIVE_AUDIO]
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_audio_input(option)

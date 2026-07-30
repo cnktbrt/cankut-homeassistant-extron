@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Extron Virtual Devices",
-        "description": "Extron IPL PRO S3 TCP bağlantısını yapılandırın.",
+        "title": "Extron IPL PRO S3 bağlantısı",
+        "description": "Extron işlemcisinin TCP sunucu bilgilerini girin.",
         "data": {
           "host": "IP adresi",
           "port": "TCP portu"
@@ -14,7 +14,7 @@
       "cannot_connect": "Extron cihazına bağlanılamadı."
     },
     "abort": {
-      "already_configured": "Bu Extron bağlantısı zaten yapılandırılmış."
+      "already_configured": "Bu Extron cihazı zaten eklenmiş."
     }
   }
 }
