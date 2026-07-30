@@ -1,40 +1,37 @@
-# Extron Virtual Devices 1.2.0
+# Extron Virtual Devices
 
-Bu paket üç Home Assistant select varlığı oluşturur:
+Home Assistant custom integration for Extron IPL PRO S3.
 
-- `select.kramer_vs_88h2a_secili_cikis`
-- `select.kramer_vs_88h2a_aktif_giris`
-- `select.kramer_vs_88h2a_aktif_ses`
+## Özellikler
 
-## Ses akışı
+- Epson projektör aç/kapat ve durum geri bildirimi
+- Kramer VS-88H2A video çıkış/giriş seçimi
+- Kramer harici ses giriş seçimi
+- Analog OUT 1 ses seviyesi: 0–100
+- Ses aç / ses kıs butonları
+- Ses mute switch'i
+- **Kramer Code Send** metin kutusu
 
-Home Assistant:
+## Code Send kullanımı
 
-`MATRIX_AUDIO:4`
+Cihaz sayfasındaki `Kramer VS-88H2A Code Send` kutusuna tek bir
+Kramer Protocol 3000 komutu yazıp **Ayarla** düğmesine basın.
+Komut `#` ile başlamalıdır. Örnekler:
 
-Extron:
+```text
+#VID? 4
+#AV 4>2
+#VOLUME? 1
+#VOLUME 1,75
+#EXT-AUD?
+#MODEL?
+```
 
-`#EXT-AUD 0,1,1,4\r`
-
-Kramer geri bildirimi:
-
-`~01@EXT-AUD 0,1,1,4`
-
-Extron → Home Assistant:
-
-`MATRIX_AUDIO_STATE:4`
+Bu özellik için Extron `main.py` dosyasının `MATRIX_RAW:` komutunu
+desteklemesi gerekir.
 
 ## Kurulum
 
-1. ZIP içindeki `custom_components/extron_virtual_devices` klasörünü Home Assistant'taki `/config/custom_components/` içine kopyalayın.
-2. Home Assistant'ı yeniden başlatın.
-3. Entegrasyonu kaldırmayın; mevcut kayıt yeni kodla açılmalıdır.
-4. Extron Global Scripter projesinde mevcut `main.py` dosyasını paketteki `main.py` ile değiştirin.
-5. Extron projesini yeniden yükleyin.
-6. HACS kullanıyorsanız sürüm önbelleği nedeniyle entegrasyonu yeniden indirin veya Home Assistant'ı yeniden başlatın.
-
-## Not
-
-`#EXT-AUD?` sorgusunun VS-88H2A firmware sürümündeki kesin biçimi farklıysa, komut gönderiminden sonraki
-`~01@EXT-AUD 0,1,1,n` geri bildirimi yine durumu günceller. Sorgu cevabı gelmezse yalnızca başlangıçta ses state'i
-boş kalır; ilk ses butonuna basıldığında fiziksel geri bildirimle güncellenir.
+`custom_components/extron_virtual_devices` klasörünü Home Assistant
+`/config/custom_components/` altına kopyalayın ve Home Assistant'ı
+yeniden başlatın.
